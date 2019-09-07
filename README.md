@@ -1,6 +1,20 @@
 # rpido
 
-Shell script for config of Raspbian for Raspberry Pi
+Shell script for config of Raspbian for Raspberry Pi inspired by a script of the same name written by Peter Lorenzen.
+
+If you set up a number of Raspberry Pi configurations, need to configure a computer cluster or want to setup online access without a monitor and keyboard then you should find this script useful.
+
+## Sept 7 2019
+
+I have concentrated on adding config file support -c takes a number parameter 1 to 9. The file rpido-config1.sh (for example) will have a main function that echos the description to the console and has functions containing the items to configure.  The 0 parameter will look for each of these files and execute them so that the descriptions are shown along with the config number.  If there are no files present, then a rpido-configX.sh file will be created as a template for numbering, adding a description and picking options.
+
+I have also added a host count -H right now the allowable values are 2 thru 9.  If working with images -i and specifying a hostname -h name and not wanting to keep the file system open -k then the specified hostname will have a number as a suffix.  The image file's name will also have the same suffix number and the specified number of files will be created.  So if making a cluster you can have the same base hostname for each computer.
+
+URL / Rasbian version selection was added as an option -u with an parameter for chosing the full, normal and lite versions of rasbian to download.  This parameter defaults to normal if not specified. The choice will be overwritten by the value in a config file if you use the -c option.
+
+Right now, this is my plan.  Basic options can be set on the command line. If what you want is to grab the latest version and write it to a card a config file will not be needed. Using a config file will allow over riding those options. The config file will be read (if used) and the image prepared. The emulator will be copied to the image to allow running programs. A config script and the rpido-target.sh file will be copied to the image and then chroot to run the script.  This should allow configuration of hardware devices, setting up SSH, wifi, VNC, and other Raspberry Pi hardware.  A template directory and -t will allow you to copy files to the file system for things like adding SSH keys, setting bash alias, etc...
+
+## Aug 28 2019
 
 My work on a project requiring the use of several raspberry pis lead me to the want an easy way to set up an image before ever inserting it into the Pi.
 

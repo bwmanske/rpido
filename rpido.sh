@@ -150,7 +150,7 @@ usage() {
     echo    " -i       image file operations"
     echo    " -h name  sets /etc/hostname"
     echo    " -H #     #=2..9  number of sdcard images with hostname numbered"
-    echo -e " -u ver   valid options \"full\", \"normal\" (default), \"lite\""
+    echo -e " -u ver   Rasbian version valid options \"full\", \"normal\" (default), \"lite\""
     echo    " -s       start shell on raspian"
     echo -e " -t       copy directory \"template\\\" to sdcard / image"
     echo    " -v       verbose - shell debug mode"
