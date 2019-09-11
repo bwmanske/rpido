@@ -21,8 +21,19 @@ set_SD()
 
 # Associate LoopDevice with block device-associate Kernel device name to image file
 loopdev_SD() {
+    local LD_Status
+
     LoopDev=$(sudo losetup -f)              # set LoopDev to first available device
-    SUDO losetup -P $LoopDev $LATEST.img    # create loop device
+    if [ -z $1 ]; then
+        SUDO losetup -P $LoopDev $LATEST.img    # create loop device
+        LD_Status="$?"
+    else
+#        pushd $IMG_DIR
+        SUDO losetup -P $LoopDev $IMG_DIR/$LATEST$1.img    # create loop device
+        LD_Status="$?"
+#        pop d
+    fi
+    [ "$LD_Status" != "0" ] && echo "losetup fail exit code $LD_Status" && exit 1
     SD=$(basename ${LoopDev}p)              # set SD var to loop device name
 }
 
@@ -40,9 +51,9 @@ unmount_SD() {
 # mount the SD card or image
 mount_SD() {
     unmount_SD
-    mkdir -p $RPI_ROOT
-    SUDO mount /dev/${SD}2 $RPI_ROOT
-    SUDO mount /dev/${SD}1 $RPI_ROOT/boot
+    mkdir -p $MY_SCRIPT_DIR/$RPI_ROOT
+    SUDO mount /dev/${SD}2 $MY_SCRIPT_DIR/$RPI_ROOT
+    SUDO mount /dev/${SD}1 $MY_SCRIPT_DIR/$RPI_ROOT/boot
 }
 
 # write the image in the .zip file to the SD card 
@@ -53,7 +64,7 @@ write_SD() {
 
 # 
 unmount_all() {
-    [ ! -z "$RPI_ROOT" ] || return 1
+    [ ! -z "$MY_SCRIPT_DIR/$RPI_ROOT" ] || return 1
     [ "$keep_mount"=="y" ] || return 0
     FULLPATH=$(realpath ${RPI_ROOT})
     LoopDev=$(mount | grep "/dev/loop[0-9]*p2.*$FULLPATH" | sed 's/p2.*$//')
@@ -63,7 +74,8 @@ unmount_all() {
     done
     for d in $LoopDev; do
         SUDO losetup -d $d
-        #SUDO rm -f ${d}*  # in the original script - what for?
+        SUDO rm -f $d/*
+        SUDO rm -f $d"p*"
     done
 }
 
@@ -110,7 +122,7 @@ find_URL () {
 
 # create a config file template
 config_template() {
-    cat > $MY_INC_DIR/rpido-configX.sh << CONFIG_END
+    cat > $MY_SCRIPT_DIR/config$1/rpido-config$1.sh << CONFIG_END
 #!/bin/bash
 
 # add the settings here
@@ -126,17 +138,14 @@ read_config_settings() {
 echo -e "This config file is the template.\n"
 echo -e "Addidional Details:"
 echo -e "You Need to:"
-echo -e " - change the capital X in the filename to a number between 1 and 9."
 echo -e " - put you config discription here"
 echo -e " - uncomment the CurlAddr for one of the raspbian distros."
 echo -e "\n   ...   more to come   ..."
 CONFIG_END
-    chmod +x "$MY_INC_DIR/rpido-configX.sh"
+    chmod +x "$MY_SCRIPT_DIR/config$1/rpido-config$1.sh"
     if [ "$?" == "0" ]; then            #check the return status of chmod
-        echo "Template File $MY_INC_DIR/rpido-configX.sh created and made executable."
+        echo "Template File $MY_SCRIPT_DIR/config$1/rpido-config$1.sh created and made executable."
     fi
-    sync
-    exit 1
 }
 
 # Display usage instructions for this script
@@ -152,7 +161,7 @@ usage() {
     echo    " -H #     #=2..9  number of sdcard images with hostname numbered"
     echo -e " -u ver   Rasbian version valid options \"full\", \"normal\" (default), \"lite\""
     echo    " -s       start shell on raspian"
-    echo -e " -t       copy directory \"template\\\" to sdcard / image"
+    echo -e " -t       copy directory \"template/\" to sdcard or image"
     echo    " -v       verbose - shell debug mode"
     echo    " -q       quiet"
     echo    " cmd      chroot rpi cmd"
@@ -163,10 +172,10 @@ usage() {
 #*************************************
 # the script execution begins here
 #*************************************
-set +x   #tyrn on debug level info
+set +x   #turn on debug level info
 
 # Initializations
-MY_INC_DIR=$(dirname $(readlink -f $0))   # save the directory the script started in
+MY_SCRIPT_DIR=$(dirname $(readlink -f $0))   # save the directory the script started in
 
 VERBOSE=1                   # start with medium console out setting
 RPI_ROOT=sdcard             # default to working with the SD Card
@@ -203,13 +212,15 @@ shift $(($OPTIND-1))              # remove used options
                                   # regular output if VERBOSE = 1
                                   # Quiet operation if VERBOSE = 0
 
-# set the curl address based on the requested version
-case $($Rasbian_version,,) in
-full)   CurlAddr=$CurlAddrFull          # select the fill image
-normal) CurlAddr=$CurlAddrNormal        # select the normal image
-lite)   CurlAddr=$CurlAddrLite          # select the lite image
-*) usage invalid Rasbian selection ;;   # show usage error and exit
-esac
+if [ -z Rasbian_version ]; then
+    # set the curl address based on the requested version
+    case $($Rasbian_version,,) in
+    full)   CurlAddr=$CurlAddrFull ;;         # select the fill image
+    normal) CurlAddr=$CurlAddrNormal ;;       # select the normal image
+    lite)   CurlAddr=$CurlAddrLite ;;         # select the lite image
+    *) usage invalid Rasbian selection ;;     # show usage error and exit
+    esac
+fi
 
 # check for hostcount conflicts
 if [ $hostcount -ne 0 ]; then
@@ -238,35 +249,49 @@ if [ $config_num!=-1 ]; then         # no config command line parameter so skip 
         # test each possible file name
         for i in {1..9}; do
             # Print the number and description for each existing file
-            MY_INC_FILE=$MY_INC_DIR/rpido-config$i.sh
-            if [ -e $MY_INC_FILE ]; then
+            MY_CONFIG_FILE=$MY_SCRIPT_DIR/config$i/rpido-config$i.sh
+            if [ -e $MY_CONFIG_FILE ]; then
                 files_found=$(($files_found+1))
                 echo "Config File #$i found"
-                . $MY_INC_FILE     # run the script to show the description
+                . $MY_CONFIG_FILE     # run the script to show the description
             fi
         done
         # if no files were found create a template file if it doesn't exist already
-        if [[( $files_found==0 ) && ( ! -e $MY_INC_DIR/"rpido-configX.sh" )]]; then
-            config_template
+        if [[( $files_found==0 )]]; then
+            echo "No config files found. Using -c # will create a directory and template"
         fi
         exit 1
     else
         if [[ ( $config_num -ge 1 ) && ( $config_num -le 9 ) ]]; then
-            # number is valid - build the config file name 
-            MY_INC_FILE=rpido-config$config_num.sh
+            # number is valid - build the config file name
+            MY_CONFIG_FILE=config$config_num/rpido-config$config_num.sh
         else
             usage illegal config number    # usage forces an exit
         fi
     fi
 
     #include the indicated file if it can be found
-    if [ -e $MY_INC_DIR/$MY_INC_FILE ]; then
+    if [ -e $MY_SCRIPT_DIR/$MY_CONFIG_FILE ]; then
         echo "Config File #$config_num found"
-        chmod +x $MY_INC_DIR/$MY_INC_FILE
-        . $MY_INC_DIR/$MY_INC_FILE
+        chmod +x $MY_SCRIPT_DIR/$MY_CONFIG_FILE
+        . $MY_SCRIPT_DIR/$MY_CONFIG_FILE
         read_config_settings
     else
-        echo "Config File #$config_num does not exist"
+        echo    "Config File #$config_num does not exist"
+        echo -e "creating dir \"config$config_num/\" and template"
+        rm -rf config$config_num 
+        mkdir config$config_num
+        [ "$?" != "0" ] && echo -e "failed create dir \"config$config_num/\"" && exit 1
+        pushd config$config_num
+        config_template $config_num
+        mkdir template
+        mkdir template/etc
+        mkdir template/etc/default
+        mkdir template/etc/wpa_supplicant
+        mkdir template/boot
+        mkdir template/home
+        popd
+        sync
         exit 1
     fi
 fi
@@ -279,11 +304,11 @@ fi
 
 # the given URL is a known redirect - we need the redirect filename URL
 get_first_URL
-[ "$?" != "0" ] && ( echo "failed to get URL $URL"; exit 1 )
+[ "$?" != "0" ] && echo "failed to get URL $URL" && exit 1
 
 echo "Looking for redirect URL"
 find_URL
-[ "$?" != "0" ] && ( echo "failed to find URL $URL"; exit 1 )
+[ "$?" != "0" ] && echo "failed to find URL $URL" && exit 1
 
 # The unique filename is now in URL var
 echo "Found '.zip'"
@@ -292,10 +317,16 @@ echo "URL="$URL
 # Get just the file name
 LATEST=$(basename $URL .zip)
 zipfile=DIST/$LATEST.zip
+if [[ ( $config_num -ge 1 ) && ( $config_num -le 9 ) ]]; then
+    # number is valid - set the config dir location for the image
+    IMG_DIR=config$config_num
+else
+    IMG_DIR=""
+fi
 
 # If the zip file with this name is missing then get it
 [ -f $zipfile ] || curl --create-dirs -o $zipfile -L $URL # use -L to follow redirects
-[ "$?" != "0" ] && ( echo "Curl HTTP request failed"; exit 1 )
+[ "$?" != "0" ] && echo "Curl HTTP request failed" && exit 1
 
 
 # The default is to write to the SD card
@@ -312,16 +343,33 @@ if [ -z "$use_image_file" ]; then
 else
     # **** Use image file
 
-    # If the image file with this name is missing then extract it
-    if [[ ( $hostcount -ne 0 ) && ( -z $hostname) ]]; then
-        # for multiple image handling number the image file
-        [ -f $LATEST"1.img" ] || unzip -x $zipfile $LATEST"1.img"
-    else
-        [ -f "$LATEST.img" ] || unzip -x $zipfile $LATEST.img
-    fi
+    # For multiple images hostcount will be non-zero and hostname will be given
+    if [[ ( $hostcount -ne 0 ) && ( ! -z $hostname ) ]]; then
+        # extract image & for multiple image handling number the image file
+        if [ ! -f $IMG_DIR/$LATEST"1.img" ]; then
+            unzip -x $zipfile -d $IMG_DIR $LATEST".img"
+            if [ "$?" != "0" ]; then
+                echo "unzip request failed "$IMG_DIR/$LATEST"1.img"
+                exit 1
+            fi
+            mv $IMG_DIR/$LATEST".img" $IMG_DIR/$LATEST"1.img"
+        fi
 
-    # find loop device to use as mount point for image file
-    loopdev_SD
+        # find loop device to use as mount point for image file
+        loopdev_SD "1"
+    else
+        # extract the image file
+        if [ ! -f "$LATEST.img" ]; then
+            unzip -x $zipfile $LATEST.img
+            if [ "$?" != "0" ]; then
+                echo "unzip request failed $LATEST.img"
+                exit 1
+            fi
+        fi
+
+        # find loop device to use as mount point for image file
+        loopdev_SD
+    fi
 fi
 
 # mount the image or SD card
@@ -336,8 +384,8 @@ if [ "$use_template" = y ]; then
 fi
 
 # create a new hostname file 
-if [ -z "$hostname" ]; then
-    if [ $hostcount -eq 0]; then
+if [ ! -z "$hostname" ]; then
+    if [ $hostcount -eq "0" ]; then
         echo $hostname | sudo tee $RPI_ROOT/etc/hostname >/dev/null
     else
         echo $hostname"1" | sudo tee $RPI_ROOT/etc/hostname >/dev/null
@@ -356,12 +404,23 @@ fi
 # unmount all - unless the user has specified -k option
 unmount_all
 
-for i in {2..$hostcount}; do
-    # copy image file to the new file name
-    # mount the image
-    # change the host name
-    # unmount the image
-done
+# if multiple copies for multiple host names copy mount set the host name and unmount
+if [ $hostcount -ge "2" ]; then
+    for i in {2..$hostcount}; do
+        # copy image file to the new file name
+        cp $IMG_DIR/$LATEST$(($i-1)).img $IMG_DIR/LATEST$i.img
+
+        # mount the image
+        loop_SD
+        mount_SD
+
+        # change the host name
+        echo $hostname$i | sudo tee $RPI_ROOT/etc/hostname >/dev/null
+
+        # unmount the image
+        unmount_all
+    done
+fi
 
 # tell the file system to catch up before exiting
 sync
