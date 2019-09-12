@@ -4,6 +4,12 @@ Shell script for config of Raspbian for Raspberry Pi inspired by a script of the
 
 If you set up a number of Raspberry Pi configurations, need to configure a computer cluster or want to setup online access without a monitor and keyboard then you should find this script useful.
 
+## Sept 12 2019
+
+The structure for the config files and the multi host names is in place and working. When selecting host count -H now multiple copies of the image files will be created with the requested host name and the suffix.
+
+I am now working on the structure that it takes to copy the config and target script file to the image / SD card and run it from the chroot command.
+
 ## Sept 7 2019
 
 I have concentrated on adding config file support -c takes a number parameter 1 to 9. The file rpido-config1.sh (for example) will have a main function that echos the description to the console and has functions containing the items to configure.  The 0 parameter will look for each of these files and execute them so that the descriptions are shown along with the config number.  If there are no files present, then a rpido-configX.sh file will be created as a template for numbering, adding a description and picking options.
