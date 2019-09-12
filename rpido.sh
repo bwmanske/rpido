@@ -11,6 +11,8 @@ SUDO() {
 # Set SD var to the basename for first SD/MMC card
 set_SD() 
 {
+    local d
+
     for d in /dev/sd[a-f] ;do
         if sudo gdisk -l $d 2>/dev/null| grep "^Model:.*SD/MMC">/dev/null; then
             SD=$(basename $d)
@@ -28,10 +30,8 @@ loopdev_SD() {
         SUDO losetup -P $LoopDev $LATEST.img    # create loop device
         LD_Status="$?"
     else
-#        pushd $IMG_DIR
         SUDO losetup -P $LoopDev $IMG_DIR/$LATEST$1.img    # create loop device
         LD_Status="$?"
-#        pop d
     fi
     [ "$LD_Status" != "0" ] && echo "losetup fail exit code $LD_Status" && exit 1
     SD=$(basename ${LoopDev}p)              # set SD var to loop device name
@@ -43,7 +43,9 @@ is_mounted() {
 
 # unmount the SD card or image - it may not be mounted but try anyway
 unmount_SD() {
-    for i in /sys/block/${SD}/${SD}?;do
+    local i
+
+    for i in /sys/block/${SD}/${SD}?; do
         SUDO umount /dev/$(basename $i) 2>/dev/null
     done
 }
@@ -53,17 +55,23 @@ mount_SD() {
     unmount_SD
     mkdir -p $MY_SCRIPT_DIR/$RPI_ROOT
     SUDO mount /dev/${SD}2 $MY_SCRIPT_DIR/$RPI_ROOT
+    sleep 2
     SUDO mount /dev/${SD}1 $MY_SCRIPT_DIR/$RPI_ROOT/boot
+    sleep 5
 }
 
 # write the image in the .zip file to the SD card 
 write_SD() {
     unmount_SD
     unzip -p $zipfile $LATEST.img | sudo dd of=/dev/${SD} bs=4M
+    sync
 }
 
 # 
 unmount_all() {
+    local p
+    local d
+
     [ ! -z "$MY_SCRIPT_DIR/$RPI_ROOT" ] || return 1
     [ "$keep_mount"=="y" ] || return 0
     FULLPATH=$(realpath ${RPI_ROOT})
@@ -77,6 +85,7 @@ unmount_all() {
         SUDO rm -f $d/*
         SUDO rm -f $d"p*"
     done
+    sync
 }
 
 # I had problems with the HTTPS request sometimes failing
@@ -103,6 +112,7 @@ find_URL () {
     local URL_found="f"
     local occurance
     local GrepResult
+
     for occurance in {1..6}; do
         echo "trying HTTP occurance # $occurance"
         URL=$(echo $CurlResult | awk -F\" '/http/ { print $'$occurance'}')
@@ -118,6 +128,37 @@ find_URL () {
     else
         return 1    # fail
     fi
+}
+
+# Multi-image generation with unique hostnames
+image_gen () {
+    local old_name
+
+    image_gen_index=2
+    while [[ $image_gen_index -le $hostcount ]]; do
+        # copy image file to the new file name
+        echo "----------------------------------------"
+        echo " copying image file to $LATEST$image_gen_index.img"
+        echo "----------------------------------------"
+        cp $IMG_DIR/$LATEST$(($image_gen_index-1)).img $IMG_DIR/$LATEST$image_gen_index.img
+        sync
+
+        # mount the image
+        loopdev_SD $image_gen_index
+        mount_SD
+
+        # change the host name
+        old_name=$(sudo cat $RPI_ROOT/etc/hostname)
+        echo $hostname$image_gen_index | sudo tee $RPI_ROOT/etc/hostname >/dev/null
+        echo "----------------------------------------"
+        echo " HostName  Old: $old_name New: $hostname$image_gen_index"
+        echo "----------------------------------------"
+
+        # unmount the image
+        unmount_all
+        sleep 5
+        (( image_gen_index = image_gen_index + 1 ))
+    done
 }
 
 # create a config file template
@@ -347,6 +388,9 @@ else
     if [[ ( $hostcount -ne 0 ) && ( ! -z $hostname ) ]]; then
         # extract image & for multiple image handling number the image file
         if [ ! -f $IMG_DIR/$LATEST"1.img" ]; then
+            echo "----------------------------------------"
+            echo " unzip image file to "$LATEST"1.img"
+            echo "----------------------------------------"
             unzip -x $zipfile -d $IMG_DIR $LATEST".img"
             if [ "$?" != "0" ]; then
                 echo "unzip request failed "$IMG_DIR/$LATEST"1.img"
@@ -360,6 +404,9 @@ else
     else
         # extract the image file
         if [ ! -f "$LATEST.img" ]; then
+            echo "----------------------------------------"
+            echo " unzip image file to "$LATEST".img"
+            echo "----------------------------------------"
             unzip -x $zipfile $LATEST.img
             if [ "$?" != "0" ]; then
                 echo "unzip request failed $LATEST.img"
@@ -374,6 +421,7 @@ fi
 
 # mount the image or SD card
 mount_SD
+sync
 if [ -z "${RPI_ROOT}" -o ! -f "$RPI_ROOT/etc/rpi-issue" -o ! -f "$RPI_ROOT/boot/issue.txt" ]; then
     usage raspbian root not as expected
 fi
@@ -386,8 +434,14 @@ fi
 # create a new hostname file 
 if [ ! -z "$hostname" ]; then
     if [ $hostcount -eq "0" ]; then
+        echo "----------------------------------------"
+        echo " Setting HostName  $hostname"
+        echo "----------------------------------------"
         echo $hostname | sudo tee $RPI_ROOT/etc/hostname >/dev/null
     else
+        echo "----------------------------------------"
+        echo " Setting HostName  "$hostname"1"
+        echo "----------------------------------------"
         echo $hostname"1" | sudo tee $RPI_ROOT/etc/hostname >/dev/null
     fi
 fi
@@ -406,20 +460,7 @@ unmount_all
 
 # if multiple copies for multiple host names copy mount set the host name and unmount
 if [ $hostcount -ge "2" ]; then
-    for i in {2..$hostcount}; do
-        # copy image file to the new file name
-        cp $IMG_DIR/$LATEST$(($i-1)).img $IMG_DIR/LATEST$i.img
-
-        # mount the image
-        loop_SD
-        mount_SD
-
-        # change the host name
-        echo $hostname$i | sudo tee $RPI_ROOT/etc/hostname >/dev/null
-
-        # unmount the image
-        unmount_all
-    done
+    image_gen
 fi
 
 # tell the file system to catch up before exiting
