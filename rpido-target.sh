@@ -223,6 +223,73 @@ disable_raspi_config_at_boot() {
   fi
 }
 
+Set_Target_VNC_enable () {
+    echo -n "VNC=$Target_VNC_enable "
+    case $Target_VNC_enable in
+        D) echo "Disable" ;;
+        E) echo "Enable" ;;
+        N) echo "Nothing" ;;
+        *) echo "bad option $Target_VNC_enable" ;;
+    esac
+}
+
+Set_Target_SPI_enable () {
+    echo -n "SPI=$Target_SPI_enable "
+    case $Target_SPI_enable in
+        D) echo "Disable" ;;
+        E) echo "Enable" ;;
+        N) echo "Nothing" ;;
+        *) echo "bad option $Target_SPI_enable" ;;
+    esac
+}
+
+Set_Target_I2C_enable () {
+    echo -n "I2C=$Target_I2C_enable "
+    case $Target_I2C_enable in
+        D) echo "Disable" ;;
+        E) echo "Enable" ;;
+        N) echo "Nothing" ;;
+        *) echo "bad option $Target_I2C_enable" ;;
+    esac
+}
+
+Set_Target_Serial_enable () {
+    echo -n "Serial=$Target_Serial_enable "
+    case $Target_Serial_enable in
+        D) echo "Disable" ;;
+        E) echo "Enable" ;;
+        N) echo "Nothing" ;;
+        *) echo "bad option $Target_Serial_enable" ;;
+    esac
+}
+
+Set_Target_boot_config_enable () {
+    echo -n "boot cfg=$Target_boot_config_enable "
+    case $Target_boot_config_enable in
+        D) echo "Disable" ;;
+        E) echo "Enable" ;;
+        N) echo "Nothing" ;;
+        *) echo "bad option $Target_boot_config_enable" ;;
+    esac
+}
+
 #*************************************
 # the script execution begins here
 #*************************************
+set +x   #turn on debug level info
+
+# Initializations
+MY_TARGET_SCRIPT_DIR=$(dirname $(readlink -f $0))   # save the directory the script started in
+
+# make the script dir the working dir
+cd $MY_TARGET_SCRIPT_DIR
+
+# load the settings from the config file
+. rpido-config.sh
+read_config_settings
+
+Set_Target_VNC_enable
+Set_Target_SPI_enable
+Set_Target_I2C_enable
+Set_Target_Serial_enable
+Set_Target_boot_config_enable

@@ -22,18 +22,21 @@ set_SD()
 }
 
 # Associate LoopDevice with block device-associate Kernel device name to image file
-loopdev_SD() {
+loopdev_SD() {  #param #1=suffix number
     local LD_Status
 
     LoopDev=$(sudo losetup -f)              # set LoopDev to first available device
-    if [ -z $1 ]; then
+    if [ "$IMG_DIR" == "" ]; then
         SUDO losetup -P $LoopDev $LATEST.img    # create loop device
-        LD_Status="$?"
     else
-        SUDO losetup -P $LoopDev $IMG_DIR/$LATEST$1.img    # create loop device
-        LD_Status="$?"
+        if [ -z $1 ]; then
+            SUDO losetup -P $LoopDev $IMG_DIR/$LATEST.img    # create loop device
+        else
+            SUDO losetup -P $LoopDev $IMG_DIR/$LATEST$1.img    # create loop device
+        fi
     fi
-    [ "$LD_Status" != "0" ] && echo "losetup fail exit code $LD_Status" && exit 1
+    LD_Status="$?"
+    [ "$LD_Status" != "0" ] && echo "losetup fail-exit code $LD_Status" && exit 1
     SD=$(basename ${LoopDev}p)              # set SD var to loop device name
 }
 
@@ -57,7 +60,7 @@ mount_SD() {
     SUDO mount /dev/${SD}2 $MY_SCRIPT_DIR/$RPI_ROOT
     sleep 2
     SUDO mount /dev/${SD}1 $MY_SCRIPT_DIR/$RPI_ROOT/boot
-    sleep 5
+    sleep 2
 }
 
 # write the image in the .zip file to the SD card 
@@ -73,7 +76,6 @@ unmount_all() {
     local d
 
     [ ! -z "$MY_SCRIPT_DIR/$RPI_ROOT" ] || return 1
-    [ "$keep_mount"=="y" ] || return 0
     FULLPATH=$(realpath ${RPI_ROOT})
     LoopDev=$(mount | grep "/dev/loop[0-9]*p2.*$FULLPATH" | sed 's/p2.*$//')
     # SUDO rm -f ${RPI_ROOT}/usr/bin/qemu-arm-static 
@@ -163,7 +165,7 @@ image_gen () {
 
 # create a config file template
 config_template() {
-    cat > $MY_SCRIPT_DIR/config$1/rpido-config$1.sh << CONFIG_END
+    cat > $MY_SCRIPT_DIR/config$config_num/rpido-config$1.sh << CONFIG_END
 #!/bin/bash
 
 # add the settings here
@@ -173,20 +175,71 @@ read_config_settings() {
     #CurlAddr=$CurlAddrNormal       # link to Raspbian link
     #CurlAddr=$CurlAddrLite         # Link to Raspbian Lite link (smallest download)
 
+    # Target hardware settings - E=enable D=disable N=don't change
+    Target_VNC_enable="N"
+    Target_SPI_enable="N"
+    Target_I2C_enable="N"
+    Target_Serial_enable="N"
+    Target_boot_config_enable="N"
 }
 
 # main part of the file use for file description
+echo -e "----------------------------------------"
 echo -e "This config file is the template.\n"
 echo -e "Addidional Details:"
 echo -e "You Need to:"
 echo -e " - put you config discription here"
 echo -e " - uncomment the CurlAddr for one of the raspbian distros."
 echo -e "\n   ...   more to come   ..."
+echo -e "----------------------------------------"
 CONFIG_END
-    chmod +x "$MY_SCRIPT_DIR/config$1/rpido-config$1.sh"
+    chmod +x "$MY_SCRIPT_DIR/config$config_num/rpido-config$1.sh"
     if [ "$?" == "0" ]; then            #check the return status of chmod
-        echo "Template File $MY_SCRIPT_DIR/config$1/rpido-config$1.sh created and made executable."
+        echo "Template File $MY_SCRIPT_DIR/config$config_num/rpido-config$1.sh created and made executable."
     fi
+}
+
+# Check the config file for values in all the settings force the user to keep the config up to date
+verify_config_settings() {
+    echo "Addr=$CurlAddr"
+    [ "$CurlAddr" == "" ] && return 1
+
+    [ "$Target_VNC_enable" == "" ] && ( echo "Target_VNC_enable is missing"; return 1 )
+    if [[ "$Target_VNC_enable" != "D"         && "$Target_VNC_enable" != "E"         && "$Target_VNC_enable" != "N" ]]; then
+        echo -ne "Target_VNC_enable has a bad value=\"$Target_VNC_enable\""
+        echo "---$?"
+        return 1
+    fi
+
+    [ "$Target_SPI_enable" == "" ] && ( echo "Target_SPI_enable is missing"; return 1 )
+    if [[ "$Target_SPI_enable" != "D"         && "$Target_SPI_enable" != "E"         && "$Target_SPI_enable" != "N" ]]; then
+        echo -ne "Target_SPI_enable has a bad value=\"$Target_SPI_enable\""
+        echo "---$?"
+        return 1
+    fi
+
+    [ "$Target_I2C_enable" == "" ] && ( echo "Target_I2C_enable is missing"; return 1 )
+    if [[ "$Target_I2C_enable" != "D"         && "$Target_I2C_enable" != "E"         && "$Target_I2C_enable" != "N" ]]; then
+        echo -ne "Target_I2C_enable has a bad value=\"$Target_I2C_enable\""
+        echo "---$?"
+        return 1
+    fi
+
+    [ "$Target_Serial_enable" == "" ] && ( echo "Target_Serial_enable is missing"; return 1 )
+    if [[ "$Target_Serial_enable" != "D"      && "$Target_Serial_enable" != "E"      && "$Target_Serial_enable" != "N" ]]; then
+        echo -ne "Target_Serial_enable has a bad value=\"$Target_Serial_enable\""
+        echo "---$?"
+        return 1
+    fi
+
+    [ "$Target_boot_config_enable" == "" ] && ( echo "Target_boot_config_enable is missing"; return 1 )
+    if [[ "$Target_boot_config_enable" != "D" && "$Target_boot_config_enable" != "E" && "$Target_boot_config_enable" != "N" ]]; then
+        echo -ne "Target_boot_config_enable has a bad value=\"$Target_boot_config_enable\""
+        echo "---$?"
+        return 1
+    fi
+
+    return 0    # all checks passed
 }
 
 # Display usage instructions for this script
@@ -194,18 +247,17 @@ usage() {
     unmount_all
     set +x
     [ $# == 0 ] || echo $*
-    echo    "usage: rpido <options> cmd"
+    echo    "usage: rpido <options>"
     echo    " -c #     use config #=1..9  0-show descriptions from config files"
     echo    " -w       write raspian to sdcard (default)"
     echo    " -i       image file operations"
     echo    " -h name  sets /etc/hostname"
     echo    " -H #     #=2..9  number of sdcard images with hostname numbered"
     echo -e " -u ver   Rasbian version valid options \"full\", \"normal\" (default), \"lite\""
-    echo    " -s       start shell on raspian"
+    echo -e " -s       start shell on raspian - \"exit\" to close the shell"
     echo -e " -t       copy directory \"template/\" to sdcard or image"
     echo    " -v       verbose - shell debug mode"
     echo    " -q       quiet"
-    echo    " cmd      chroot rpi cmd"
     sync
     exit 1
 }
@@ -222,7 +274,6 @@ VERBOSE=1                   # start with medium console out setting
 RPI_ROOT=sdcard             # default to working with the SD Card
 config_num=-1               # -1 if not used on the commandline
 hostcount=0                 # 0 indicates no multiple images
-keep_mount=n
 
 # these are the URLs to the image filel downloads.
 CurlAddrFull=://downloads.raspberrypi.org/raspbian_full_latest
@@ -232,13 +283,12 @@ CurlAddrLite=://downloads.raspberrypi.org/raspbian_lite_latest
 CurlAddr=$CurlAddrNormal    # default to the middle sized image
 
 
-while getopts ?c:h:H:ikqstu:v opt;do
+while getopts ?c:h:H:iqstu:v opt;do
     case $opt in
     c) config_num=$OPTARG ;;
     h) hostname=$OPTARG ;;
     H) hostcount=$OPTARG ;;
     i) use_image_file=y ;;
-    k) keep_mount=y ;;
     q) VERBOSE=0 ;;
     s) rpi_shell=y ;;
     t) use_template=y ;;
@@ -276,15 +326,10 @@ if [ $hostcount -ne 0 ]; then
     if [ -z hostname ]; then
         usage to get multiple host images specify a host name
     fi
-
-    # not allowed to keep a mount if requesting multiple images
-    if [ "$keep_mount" == 'y' ]; then
-        usage the -k keep_mount option can not be used with multi host image
-    fi
 fi
 
 # check for a requested config file
-if [ $config_num!=-1 ]; then         # no config command line parameter so skip this
+if [ $config_num != -1 ]; then         # no config command line parameter so skip this
     files_found=0
     if [ $config_num -eq 0 ]; then
         # test each possible file name
@@ -298,7 +343,7 @@ if [ $config_num!=-1 ]; then         # no config command line parameter so skip 
             fi
         done
         # if no files were found create a template file if it doesn't exist already
-        if [[( $files_found==0 )]]; then
+        if [[ $files_found == 0 ]]; then
             echo "No config files found. Using -c # will create a directory and template"
         fi
         exit 1
@@ -312,11 +357,21 @@ if [ $config_num!=-1 ]; then         # no config command line parameter so skip 
     fi
 
     #include the indicated file if it can be found
-    if [ -e $MY_SCRIPT_DIR/$MY_CONFIG_FILE ]; then
+    echo "DBG---$MY_SCRIPT_DIR/$MY_CONFIG_FILE"
+    if [ -e "$MY_SCRIPT_DIR/$MY_CONFIG_FILE" ]; then
         echo "Config File #$config_num found"
         chmod +x $MY_SCRIPT_DIR/$MY_CONFIG_FILE
         . $MY_SCRIPT_DIR/$MY_CONFIG_FILE
         read_config_settings
+        verify_config_settings
+        if [ $? -ne 0 ]; then
+            echo "config file is not up to date"
+            pushd config$config_num
+            [ -e rpido-configX.sh ] && rm rpido-configX.sh
+            config_template "X"
+            popd
+            exit 1
+        fi
     else
         echo    "Config File #$config_num does not exist"
         echo -e "creating dir \"config$config_num/\" and template"
@@ -335,12 +390,6 @@ if [ $config_num!=-1 ]; then         # no config command line parameter so skip 
         sync
         exit 1
     fi
-fi
-
-if [ "$rpi_shell" = y ]; then
-    CMD="bash -i"
-else
-    CMD="$*"
 fi
 
 # the given URL is a known redirect - we need the redirect filename URL
@@ -366,7 +415,7 @@ else
 fi
 
 # If the zip file with this name is missing then get it
-[ -f $zipfile ] || curl --create-dirs -o $zipfile -L $URL # use -L to follow redirects
+[ -e $zipfile ] || curl --create-dirs -o $zipfile -L $URL # use -L to follow redirects
 [ "$?" != "0" ] && echo "Curl HTTP request failed" && exit 1
 
 
@@ -389,7 +438,7 @@ else
         # extract image & for multiple image handling number the image file
         if [ ! -f $IMG_DIR/$LATEST"1.img" ]; then
             echo "----------------------------------------"
-            echo " unzip image file to "$LATEST"1.img"
+            echo " unzip image file to "$IMG_DIR/$LATEST"1.img"
             echo "----------------------------------------"
             unzip -x $zipfile -d $IMG_DIR $LATEST".img"
             if [ "$?" != "0" ]; then
@@ -402,15 +451,29 @@ else
         # find loop device to use as mount point for image file
         loopdev_SD "1"
     else
-        # extract the image file
-        if [ ! -f "$LATEST.img" ]; then
-            echo "----------------------------------------"
-            echo " unzip image file to "$LATEST".img"
-            echo "----------------------------------------"
-            unzip -x $zipfile $LATEST.img
-            if [ "$?" != "0" ]; then
-                echo "unzip request failed $LATEST.img"
-                exit 1
+        if [ "$config_num" -eq "-1" ]; then
+            # extract the image file - No Config File 
+            if [ ! -f "$LATEST.img" ]; then
+                echo "----------------------------------------"
+                echo " unzip image file to "$LATEST".img"
+                echo "----------------------------------------"
+                unzip -x $zipfile $LATEST.img
+                if [ "$?" != "0" ]; then
+                    echo "unzip request failed $LATEST.img"
+                    exit 1
+                fi
+            fi
+        else
+            # extract the image file into the Config File dir
+            if [ ! -f "$IMG_DIR/$LATEST.img" ]; then
+                echo "----------------------------------------"
+                echo " unzip image file to "$IMG_DIR/$LATEST".img"
+                echo "----------------------------------------"
+                unzip -x $zipfile -d $IMG_DIR $LATEST".img"
+                if [ "$?" != "0" ]; then
+                    echo "unzip request failed $IMG_DIR/$LATEST.img"
+                    exit 1
+                fi
             fi
         fi
 
@@ -447,12 +510,37 @@ if [ ! -z "$hostname" ]; then
 fi
 
 # if a user entered a command from the command line execute it on the mounted file system
-if [ ! -z "$CMD" ]; then
+if [[ $config_num -gt 0 || $rpi_shell == "y" ]]; then
     SUDO rsync /usr/bin/qemu-arm-static ${RPI_ROOT}/usr/bin/
     for f in proc dev sys;do
         is_mounted $RPI_ROOT/$f || SUDO mount --bind /$f $RPI_ROOT/$f
     done
-    SUDO chroot ${RPI_ROOT} $CMD
+    # ld.so.preload fix
+    SUDO sed -i 's/^/#CHROOT#/g' $RPI_ROOT/etc/ld.so.preload
+
+    if [ $config_num -gt 0 ]; then
+        # copy the target script file and make it executable
+        cp rpido-target.sh $RPI_ROOT/home/pi/rpido-target.sh
+        chmod +x $RPI_ROOT/home/pi/rpido-target.sh
+
+        # copy the target script file and make it executable
+        cp $MY_SCRIPT_DIR/$MY_CONFIG_FILE $RPI_ROOT/home/pi/rpido-config.sh
+        chmod +x $RPI_ROOT/home/pi/rpido-config.sh
+
+        # execute the target configuration on the image / SD card
+        SUDO chroot ${RPI_ROOT} /home/pi/rpido-target.sh
+    fi
+
+    if [ $rpi_shell == "y" ]; then
+        SUDO chroot ${RPI_ROOT} /bin/bash -i
+    fi
+
+    # remove the script and config file
+    [ -e $RPI_ROOT/home/pi/rpido-target.sh ] && rm $RPI_ROOT/home/pi/rpido-target.sh
+    [ -e $RPI_ROOT/home/pi/rpido-config.sh ] && rm $RPI_ROOT/home/pi/rpido-config.sh
+
+    # revert ld.so.preload fix
+    SUDO sed -i 's/^#CHROOT#//g' $RPI_ROOT/etc/ld.so.preload
 fi
 
 # unmount all - unless the user has specified -k option
