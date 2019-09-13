@@ -4,6 +4,16 @@ Shell script for config of Raspbian for Raspberry Pi inspired by a script of the
 
 If you set up a number of Raspberry Pi configurations, need to configure a computer cluster or want to setup online access without a monitor and keyboard then you should find this script useful.
 
+## Sept 13 2019
+
+Removed the -k option to keep the file system mounted.  Same for the option to specify a command to run on the command line.  For this type of stuff use the -s option to open a shell as root in the root folder.  This will allow you to execute the commands you would have put on the command line.  The shell will stay open until you type exit.
+
+The config script is now copied to the mounted file system and it executes.  It changes to the dir where the script is run from and then loads the config script.
+
+Added validation for the script. If some values are not found or are wrong you will get a descriptive error.
+
+Info for the config is now being loaded properly but no code for actually changing options is in place yet.
+
 ## Sept 12 2019
 
 The structure for the config files and the multi host names is in place and working. When selecting host count -H now multiple copies of the image files will be created with the requested host name and the suffix.
