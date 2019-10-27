@@ -1,44 +1,40 @@
 #!/bin/bash
 # 
 
+# Get the status of the vnc server
 get_vnc() {
-    if systemctl status vncserver-x11-serviced.service  | grep -q inactive; then
+    # Infer status from the symlink
+    #
+    # Enabling VNC...Created symlink
+    #     /etc/systemd/system/multi-user.target.wants/vncserver-x11-serviced.service → 
+    #     /usr/lib/systemd/system/vncserver-x11-serviced.service.
+    # Disabling VNC...Removed
+    #     /etc/systemd/system/multi-user.target.wants/vncserver-x11-serviced.service.
+    if [ -h /etc/systemd/system/multi-user.target.wants/vncserver-x11-serviced.service ]; then
         echo 1
     else
         echo 0
     fi
 }
 
+# VNC server Enable / Disable - $1 - 0=enable 1=disable 
 do_vnc() {
-    DEFAULT=--defaultno
-    if [ $(get_vnc) -eq 0 ]; then
-        DEFAULT=
-    fi
-    if [ "$INTERACTIVE" = True ]; then
-        whiptail --yesno "Would you like the VNC Server to be enabled?" $DEFAULT 20 60 2
-        RET=$?
-    else
-        RET=$1
-    fi
-    if [ $RET -eq 0 ]; then
+    local status
+
+    if [ $1 -eq 0 ]; then
         if [ ! -d /usr/share/doc/realvnc-vnc-server ] ; then
             apt-get install realvnc-vnc-server
         fi
         systemctl enable vncserver-x11-serviced.service &&
-        systemctl start vncserver-x11-serviced.service &&
-        STATUS=enabled
-    elif [ $RET -eq 1 ]; then
-        systemctl disable vncserver-x11-serviced.service &&
-        systemctl stop vncserver-x11-serviced.service &&
-        STATUS=disabled
+        status=enabled
     else
-        return $RET
+        systemctl disable vncserver-x11-serviced.service &&
+        status=disabled
     fi
-    if [ "$INTERACTIVE" = True ]; then
-        whiptail --msgbox "The VNC Server is $STATUS" 20 60 1
-    fi
+    echo "The VNC Server is $status"
 }
 
+# Get the status of the SPI hardware driver - enabled or disabled
 get_spi() {
     if grep -q -E "^(device_tree_param|dtparam)=([^,]*,)*spi(=(on|true|yes|1))?(,.*)?$" $CONFIG; then
         echo 0
@@ -47,6 +43,7 @@ get_spi() {
     fi
 }
 
+# SPI Hardware driver Enable / Disable - $1 - 0=enable 1=disable 
 do_spi() {
     DEFAULT=--defaultno
     if [ $(get_spi) -eq 0 ]; then
@@ -223,20 +220,57 @@ disable_raspi_config_at_boot() {
     fi
 }
 
+# process Target_VNC_enable in the included config file
 Set_Target_VNC_enable () {
-    get_vnc
-    echo -n "VNC=$Target_VNC_enable "
+    local vnc_status
+    local vnc_pdw
+
+    vnc_status=$(get_vnc)
+    echo -n "VNC=$Target_VNC_enable $vnc_status "
     case $Target_VNC_enable in
-        D) echo "Disable" ;;
-        E) echo "Enable" ;;
-        N) echo "Nothing" ;;
+        D)  if [[ $vnc_status == 1 ]]; then
+                echo -n "Disabling VNC..."
+                do_vnc 1; 
+                echo "VNC Disabled"
+            else
+                echo "VNC is presently disabled - nothing to do"
+            fi
+            ;;
+        E)  if [[ $vnc_status == 0 ]]; then
+                echo -n "Enabling VNC..."
+                do_vnc 0; 
+
+                # options
+                if [[ $Target_VNC_VncAuth == "T" ]]; then
+                    sed -i 's/Authentication=SystemAuth/Authentication=VncAuth/g' /root/.vnc/config.d/vncserver-x11
+                else
+                    sed -i 's/Authentication=VncAuth/Authentication=SystemAuth/g' /root/.vnc/config.d/vncserver-x11
+                fi
+
+                # vnc password
+                echo $Target_vncpassword  >vncpasswd_input
+                echo $Target_vncpassword >>vncpasswd_input
+                cat vncpasswd_input
+                vnc_pwd=$(vncpasswd -printf <vncpasswd_input)
+                echo "Password=$vnc_pwd" >/etc/vnc/config.d/custom.custom
+                rm vncpasswd_input
+
+                echo "VNC Enabled"
+            else
+                echo "VNC is presently enabled - nothing to do"
+            fi
+            ;;
+        N) echo "No VNC change" ;;
         *) echo "bad option $Target_VNC_enable" ;;
     esac
 }
 
+# process Target_SPI_enable in the included config file
 Set_Target_SPI_enable () {
-    get_spi
-    echo -n "SPI=$Target_SPI_enable "
+    local spi_status
+
+    spi_status=$(get_spi)
+    echo -n "SPI=$Target_SPI_enable $? "
     case $Target_SPI_enable in
         D) echo "Disable" ;;
         E) echo "Enable" ;;
@@ -246,8 +280,8 @@ Set_Target_SPI_enable () {
 }
 
 Set_Target_I2C_enable () {
-    get_i2c
-    echo -n "I2C=$Target_I2C_enable "
+#    get_i2c
+    echo -n "I2C=$Target_I2C_enable $? "
     case $Target_I2C_enable in
         D) echo "Disable" ;;
         E) echo "Enable" ;;
@@ -257,8 +291,8 @@ Set_Target_I2C_enable () {
 }
 
 Set_Target_Serial_enable () {
-    get_serial
-    echo -n "Serial=$Target_Serial_enable "
+#    get_serial
+    echo -n "Serial=$Target_Serial_enable $? "
     case $Target_Serial_enable in
         D) echo "Disable" ;;
         E) echo "Enable" ;;
@@ -277,6 +311,76 @@ Set_Target_boot_config_enable () {
     esac
 }
 
+Add_User_Accounts() {
+    local user_num
+    local user_pwd
+    local user_group
+    local name_idx
+    local pwd_idx
+    local salt_idx
+    local sudo_idx
+
+    user_num=0
+    while [ ! -z ${Target_New_Users[$user_num*4]} ]; do
+        name_idx=$(($user_num * 4 + 0))
+        pwd_idx=$(($user_num * 4 + 1))
+        salt_idx=$(($user_num * 4 + 2))
+        sudo_idx=$(($user_num * 4 + 3))
+
+        if [[ $user_num == 0 ]]; then
+            echo "Adding user accounts"
+        fi
+        echo -n " ${Target_New_Users[$name_idx]} "
+
+        # add the user
+        if [[ ${Target_New_Users[$pwd_idx]} != "Ypwd" ]]; then
+            # add to sudoers group
+            if [[ ${Target_New_Users[$sudo_idx]} != "Ysudo" ]]; then
+                user_group="-g sudo"
+            fi
+
+            if [[ ${Target_New_Users[$salt_idx]} == "(ns)" ]]; then
+                Target_New_Users[$salt_idx]=""
+            fi
+            
+            # add a password - password will be username+salt
+            user_pwd=$(openssl passwd -1 ${Target_New_Users[$name_idx]}${Target_New_Users[$salt_idx]})
+            useradd -m -s /bin/bash $user_group -p $user_pwd ${Target_New_Users[$name_idx]}
+        else
+            # if there is no password - there is no way to be added to sudoers
+            useradd -m -s /bin/bash ${Target_New_Users[$name_idx]}
+        fi
+
+        ((user_num++))
+    done
+    if [[ $user_num > 0 ]]; then
+        echo
+    fi
+}
+
+country_time_settings() {
+    # make the timezone file
+    echo $Target_timezone  >/etc/timezone
+
+    # make a keyboard file
+    echo "XKBMODEL=$Target_keyboard"    >/etc/default/keyboard
+    echo "XKBLAYOUT=$Target_kblayout"  >>/etc/default/keyboard
+    echo "XKBVARIANT="                 >>/etc/default/keyboard
+    echo "XKBOPTIONS="                 >>/etc/default/keyboard
+    echo "BACKSPACE=guess"             >>/etc/default/keyboard
+
+    # make a wpa_supplicant.conf
+    echo "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev"  >/etc/wpa_supplicant/wpa_supplicant.conf
+    echo "update_config=1"                                         >>/etc/wpa_supplicant/wpa_supplicant.conf
+    echo "country=$Target_2char_country_code"                      >>/etc/wpa_supplicant/wpa_supplicant.conf
+    echo                                                           >>/etc/wpa_supplicant/wpa_supplicant.conf
+    echo "network={"                                               >>/etc/wpa_supplicant/wpa_supplicant.conf
+    echo -e "	ssid=\"$Target_wpa_ssid\""                         >>/etc/wpa_supplicant/wpa_supplicant.conf
+    echo -e "	psk=\"$Target_wpa_password\""                      >>/etc/wpa_supplicant/wpa_supplicant.conf
+    echo    "	key_mgmt=WPA-PSK"                                  >>/etc/wpa_supplicant/wpa_supplicant.conf
+    echo "}"                                                       >>/etc/wpa_supplicant/wpa_supplicant.conf
+}
+
 #*************************************
 # the script execution begins here
 #*************************************
@@ -284,6 +388,7 @@ set +x   #turn on debug level info
 
 # Initializations
 MY_TARGET_SCRIPT_DIR=$(dirname $(readlink -f $0))   # save the directory the script started in
+CONFIG=/boot/config.txt
 
 # make the script dir the working dir
 cd $MY_TARGET_SCRIPT_DIR
@@ -292,6 +397,11 @@ cd $MY_TARGET_SCRIPT_DIR
 . rpido-config.sh
 read_config_settings
 
+country_time_settings
+
+Add_User_Accounts
+
+# hardware settings
 Set_Target_VNC_enable
 Set_Target_SPI_enable
 Set_Target_I2C_enable

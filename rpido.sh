@@ -181,6 +181,33 @@ read_config_settings() {
     Target_I2C_enable="N"
     Target_Serial_enable="N"
     Target_boot_config_enable="N"
+
+    # VNC options when enabled
+    Target_VNC_VncAuth="T"                  # T=true  F=false
+    Target_VNC_password="abcd1234"
+
+    # Country and time settings
+    Target_2char_country_code="us"
+    Target_timezone="America/Chicago"       # /etc/timezone
+    Target_keyboard="pc105"                 # /etc/default/keyboard
+    Target_kblayout="$Target_2char_country_code"
+
+    # wpa ssid and password
+    Target_wpa_ssid="ssid"                  # /etc/wpa_supplicant/wpa_supplicant.conf
+    Target_wpa_password="password"
+
+    # user to add - set password - salt - sudoers
+    # Password create Ypwd=create password  Npwd=No password
+    #      if created, password will be user name + salt (a string use quotes for numbers)
+    #      reserved salt values
+    #        - "(ns)" represents a blank value
+    #        - "Ysudo" and "Nsudo" will cause the script to think salt is blank
+    # sudoers - Ysudo=add to sudoers  Nsudo=don't add
+    #      You must have a password to be added to list
+    Target_New_Users+=(adam  Ypwd "1234" Ysudo)
+    Target_New_Users+=(bill  Npwd "(ns)" Nsudo)
+    Target_New_Users+=(chris Ypwd onion  Ysudo)
+    Target_New_Users+=(deb   Ypwd "(ns)" Ysudo)
 }
 
 # main part of the file use for file description
@@ -190,6 +217,10 @@ echo -e "Addidional Details:"
 echo -e "You Need to:"
 echo -e " - put you config discription here"
 echo -e " - uncomment the CurlAddr for one of the raspbian distros."
+echo -e " - set the 2 char country code"
+echo -e " - uncomment a timezone"
+echo -e " - set wpa ssid and password"
+echo -e " - set new users to add"
 echo -e "\n   ...   more to come   ..."
 echo -e "----------------------------------------"
 CONFIG_END
@@ -201,6 +232,12 @@ CONFIG_END
 
 # Check the config file for values in all the settings force the user to keep the config up to date
 verify_config_settings() {
+    local user_num
+    local name_idx
+    local pwd_idx
+    local salt_idx
+    local sudo_idx
+
     echo "Addr=$CurlAddr"
     [ "$CurlAddr" == "" ] && return 1
 
@@ -238,6 +275,54 @@ verify_config_settings() {
         echo "---$?"
         return 1
     fi
+
+    user_num=0
+    while [ ! -z ${Target_New_Users[$user_num*4]} ]; do
+        name_idx=$(($user_num * 4 + 0))
+        pwd_idx=$(($user_num * 4 + 1))
+        salt_idx=$(($user_num * 4 + 2))
+        sudo_idx=$(($user_num * 4 + 3))
+
+        echo -n "Found user - " ${Target_New_Users[$name_idx]}
+
+        # check for password value
+        if [ ! -z ${Target_New_Users[$pwd_idx]} ]; then
+            if [[ ${Target_New_Users[$pwd_idx]} != "Ypwd" && ${Target_New_Users[$pwd_idx]} != "Npwd" ]]; then
+                echo "User password indicator bad value="${Target_New_Users[$pwd_idx]}
+                return 1
+            fi
+        else
+            echo "password indicator not found"
+        fi
+        echo -n ", "${Target_New_Users[$pwd_idx]}
+
+        # check for salt
+        if [[ ${Target_New_Users[$salt_idx]} == "Ysudo" || ${Target_New_Users[$salt_idx]} == "Nsudo" ]]; then
+            echo "User ${Target_New_Users[$name_idx]} missing salt value use \"(ns)\" for no salt"
+            return 1
+        fi
+        if [[ ${Target_New_Users[$salt_idx]} == "(ns)" ]]; then
+            Target_New_Users[$salt_idx]="\"\""
+        fi
+        echo -n ", "${Target_New_Users[$salt_idx]}
+
+        # check the sudoers value
+        if [ ! -z ${Target_New_Users[$sudo_idx]} ]; then
+            if [[ ${Target_New_Users[$sudo_idx]} != "Ysudo" && ${Target_New_Users[$sudo_idx]} != "Nsudo" ]]; then
+                echo "User sudoers indicator bad value="${Target_New_Users[$sudo_idx]}
+                return 1
+            fi
+            if [[ ${Target_New_Users[$sudo_idx]} == "Ysudo" && ${Target_New_Users[$pwd_idx]} == "Npwd" ]]; then
+                echo "User ${Target_New_Users[$name_idx]} must have a password to get sudo privledges"
+                return 1
+            fi
+        else
+            echo "sudoers indicator not found"
+        fi
+        echo ", "${Target_New_Users[$sudo_idx]}
+
+        ((user_num++)) # next user number
+    done
 
     return 0    # all checks passed
 }
@@ -365,7 +450,7 @@ if [ $config_num != -1 ]; then         # no config command line parameter so ski
         read_config_settings
         verify_config_settings
         if [ $? -ne 0 ]; then
-            echo "config file is not up to date"
+            echo "config file is not up to date or has an error"
             pushd config$config_num
             [ -e rpido-configX.sh ] && rm rpido-configX.sh
             config_template "X"
@@ -531,7 +616,7 @@ if [[ $config_num -gt 0 || $rpi_shell == "y" ]]; then
         SUDO chroot ${RPI_ROOT} /home/pi/rpido-target.sh
     fi
 
-    if [ $rpi_shell == "y" ]; then
+    if [[ $rpi_shell == "y" ]]; then
         SUDO chroot ${RPI_ROOT} /bin/bash -i
     fi
 
