@@ -213,10 +213,10 @@ read_config_settings() {
 # main part of the file use for file description
 echo -e "----------------------------------------"
 echo -e "This config file is the template.\n"
-echo -e "Addidional Details:"
+echo -e "Additional Details:"
 echo -e "You Need to:"
-echo -e " - put you config discription here"
-echo -e " - uncomment the CurlAddr for one of the raspbian distros."
+echo -e " - put you config description here"
+echo -e " - uncomment the CurlAddr for one of the Raspbian distros."
 echo -e " - set the 2 char country code"
 echo -e " - uncomment a timezone"
 echo -e " - set wpa ssid and password"
