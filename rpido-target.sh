@@ -351,6 +351,12 @@ Add_User_Accounts() {
             useradd -m -s /bin/bash ${Target_New_Users[$name_idx]}
         fi
 
+        # if the user has a template dir
+        if [ -d $MY_TARGET_SCRIPT_DIR/template/home/${Target_New_Users[$name_idx]} ]; then
+            cp -r $MY_TARGET_SCRIPT_DIR/template/home/${Target_New_Users[$name_idx]}/* /home/${Target_New_Users[$name_idx]}
+            chown -R ${Target_New_Users[$name_idx]} /home/${Target_New_Users[$name_idx]}/*
+        fi
+
         ((user_num++))
     done
     if [[ $user_num > 0 ]]; then
@@ -381,6 +387,28 @@ country_time_settings() {
     echo "}"                                                       >>/etc/wpa_supplicant/wpa_supplicant.conf
 }
 
+# the files for the skel dir must be set up before adding users
+# these files are added to each user as they are created
+template_pre_add_user() {
+    # if the template/skel dir exists
+    if [ -d $MY_TARGET_SCRIPT_DIR/template/skel ]; then
+        cp -r $MY_TARGET_SCRIPT_DIR/template/skel/* /etc/skel
+    fi
+}
+
+# any files in each of these directories should be moved and chmod to correct access
+template_post_add_user() {
+    local f
+
+    if [ -d $MY_TARGET_SCRIPT_DIR/template ]; then
+        for f in etc bin sbin; do
+            if [ -d $MY_TARGET_SCRIPT_DIR/template/$f ]; then
+                cp -R $MY_TARGET_SCRIPT_DIR/template/$f/* /$f
+            fi
+        done
+    fi
+}
+
 #*************************************
 # the script execution begins here
 #*************************************
@@ -395,11 +423,16 @@ cd $MY_TARGET_SCRIPT_DIR
 
 # load the settings from the config file
 . rpido-config.sh
+
 read_config_settings
 
 country_time_settings
 
+template_pre_add_user
+
 Add_User_Accounts
+
+template_post_add_user
 
 # hardware settings
 Set_Target_VNC_enable

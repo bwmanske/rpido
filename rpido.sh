@@ -24,20 +24,18 @@ set_SD()
 # Associate LoopDevice with block device-associate Kernel device name to image file
 loopdev_SD() {  #param #1=suffix number
     local LD_Status
+    local latest_image
 
-    LoopDev=$(sudo losetup -f)              # set LoopDev to first available device
-    if [ "$IMG_DIR" == "" ]; then
-        SUDO losetup -P $LoopDev $LATEST.img    # create loop device
+    LoopDev=$(sudo losetup -f)                   # set LoopDev to first available device
+    if [ -z $1 ]; then
+        latest_image = $IMG_DIR/$LATEST.img      # set the image name
     else
-        if [ -z $1 ]; then
-            SUDO losetup -P $LoopDev $IMG_DIR/$LATEST.img    # create loop device
-        else
-            SUDO losetup -P $LoopDev $IMG_DIR/$LATEST$1.img    # create loop device
-        fi
+        latest_image = $IMG_DIR/$LATEST$1.img    # set the image name
     fi
+    SUDO losetup -P $LoopDev $latest_image       # create loop device
     LD_Status="$?"
     [ "$LD_Status" != "0" ] && echo "losetup fail-exit code $LD_Status" && exit 1
-    SD=$(basename ${LoopDev}p)              # set SD var to loop device name
+    SD=$(basename ${LoopDev}p)                   # set SD var to loop device name
 }
 
 is_mounted() {
@@ -158,7 +156,7 @@ image_gen () {
 
         # unmount the image
         unmount_all
-        sleep 5
+        sleep 3
         (( image_gen_index = image_gen_index + 1 ))
     done
 }
@@ -336,11 +334,12 @@ usage() {
     echo    " -c #     use config #=1..9  0-show descriptions from config files"
     echo    " -w       write raspian to sdcard (default)"
     echo    " -i       image file operations"
+    echo    " -k       keep \".IMG\" files"
+    echo -e " -f file  uses the zipped image in the \"rpido/DISTROS\" dir named \"file\""
     echo    " -h name  sets /etc/hostname"
     echo    " -H #     #=2..9  number of sdcard images with hostname numbered"
     echo -e " -u ver   Rasbian version valid options \"full\", \"normal\" (default), \"lite\""
     echo -e " -s       start shell on raspian - \"exit\" to close the shell"
-    echo -e " -t       copy directory \"template/\" to sdcard or image"
     echo    " -v       verbose - shell debug mode"
     echo    " -q       quiet"
     sync
@@ -354,6 +353,7 @@ set +x   #turn on debug level info
 
 # Initializations
 MY_SCRIPT_DIR=$(dirname $(readlink -f $0))   # save the directory the script started in
+MY_DISTRO_DIR="$MY_SCRIPT_DIR/DISTROS"
 
 VERBOSE=1                   # start with medium console out setting
 RPI_ROOT=sdcard             # default to working with the SD Card
@@ -374,9 +374,10 @@ while getopts ?c:h:H:iqstu:v opt;do
     h) hostname=$OPTARG ;;
     H) hostcount=$OPTARG ;;
     i) use_image_file=y ;;
+    k) keep_image_file=y ;;
+    f) zipped_image_file=$OPTARG ;;
     q) VERBOSE=0 ;;
     s) rpi_shell=y ;;
-    t) use_template=y ;;
     u) Rasbian_version=$OPTARG ;;
     v) VERBOSE=$(($VERBOSE+1)) ;;
     *) usage ;;
@@ -396,6 +397,11 @@ if [ -z Rasbian_version ]; then
     lite)   CurlAddr=$CurlAddrLite ;;         # select the lite image
     *) usage invalid Rasbian selection ;;     # show usage error and exit
     esac
+fi
+
+# -k must have -i perform a check
+if [[ ( $keep_image_file == "y" ) && ( -z $use_image_file ) ]];then
+    usage -k (Keep Image File) requires -i (Use Image File)
 fi
 
 # check for hostcount conflicts
@@ -477,32 +483,50 @@ if [ $config_num != -1 ]; then         # no config command line parameter so ski
     fi
 fi
 
-# the given URL is a known redirect - we need the redirect filename URL
-get_first_URL
-[ "$?" != "0" ] && echo "failed to get URL $URL" && exit 1
+if [ -z $zipped_image_file ]; then
+    # the given URL is a known redirect - we need the redirect filename URL
+    get_first_URL
+    [ "$?" != "0" ] && echo "failed to get URL $URL" && exit 1
 
-echo "Looking for redirect URL"
-find_URL
-[ "$?" != "0" ] && echo "failed to find URL $URL" && exit 1
+    echo "Looking for redirect URL"
+    find_URL
+    [ "$?" != "0" ] && echo "failed to find URL $URL" && exit 1
 
-# The unique filename is now in URL var
-echo "Found '.zip'"
-echo "URL="$URL
+    # The unique filename is now in URL var
+    echo "Found '.zip'"
+    echo "URL="$URL
 
-# Get just the file name
-LATEST=$(basename $URL .zip)
-zipfile=DIST/$LATEST.zip
-if [[ ( $config_num -ge 1 ) && ( $config_num -le 9 ) ]]; then
-    # number is valid - set the config dir location for the image
-    IMG_DIR=config$config_num
+    # Get just the file name
+    LATEST=$(basename $URL .zip)
+    zipfile=$MY_DISTRO_DIR/$LATEST.zip
+    if [[ ( $config_num -ge 1 ) && ( $config_num -le 9 ) ]]; then
+        # number is valid - set the config dir location for the image
+        IMG_DIR=./config$config_num
+    else
+        IMG_DIR="."
+    fi
+
+    # If the zip file with this name is missing then get it
+    [ -e $zipfile ] || curl --create-dirs -o $zipfile -L $URL # use -L to follow redirects
+    [ "$?" != "0" ] && echo "Curl HTTP request failed" && exit 1
 else
-    IMG_DIR=""
+    if [ -e $MY_DISTRO_DIR/$zipped_image_file ]; then
+        # pretend we found the file the usual way
+        LATEST=$(basename $zipped_image_file .zip)
+        zipfile=$MY_DISTRO_DIR/$LATEST.zip
+        if [[ ( $config_num -ge 1 ) && ( $config_num -le 9 ) ]]; then
+            # number is valid - set the config dir location for the image
+            IMG_DIR=./config$config_num
+        else
+            IMG_DIR="."
+        fi
+
+        echo "Command Line file $zipfile"
+    else
+        echo "$zipfile from Command Line - NOT FOUND"
+        exit 1
+    fi
 fi
-
-# If the zip file with this name is missing then get it
-[ -e $zipfile ] || curl --create-dirs -o $zipfile -L $URL # use -L to follow redirects
-[ "$?" != "0" ] && echo "Curl HTTP request failed" && exit 1
-
 
 # The default is to write to the SD card
 if [ -z "$use_image_file" ]; then
@@ -518,50 +542,40 @@ if [ -z "$use_image_file" ]; then
 else
     # **** Use image file
 
-    # For multiple images hostcount will be non-zero and hostname will be given
+    IMG_FILE=$LATEST".img"
+
+    # set the name of the image file
     if [[ ( $hostcount -ne 0 ) && ( ! -z $hostname ) ]]; then
-        # extract image & for multiple image handling number the image file
-        if [ ! -f $IMG_DIR/$LATEST"1.img" ]; then
-            echo "----------------------------------------"
-            echo " unzip image file to "$IMG_DIR/$LATEST"1.img"
-            echo "----------------------------------------"
-            unzip -x $zipfile -d $IMG_DIR $LATEST".img"
-            if [ "$?" != "0" ]; then
-                echo "unzip request failed "$IMG_DIR/$LATEST"1.img"
-                exit 1
-            fi
-            mv $IMG_DIR/$LATEST".img" $IMG_DIR/$LATEST"1.img"
+        IMG_NAME=$LATEST"1.img"
+    fi
+
+    # remove the image file unless -k has been used
+    if [[ ( -f $IMG_DIR/$IMG_FILE || -f $IMG_DIR/$IMG_NAME ) && ( -z $keep_image_file ) ]]; then
+        if [ ! -z $IMG_NAME ]; then
+            rm "$IMG_DIR/$LATEST?.img"  # delete all files created for multi host count
         fi
+        rm $IMG_DIR/$IMG_FILE
+    fi
+
+    # extract the image file
+    if [ ! -f "$IMG_DIR/$IMG_FILE" ]; then
+        echo "----------------------------------------"
+        echo " unzip image file to $IMG_DIR/$IMG_FILE"
+        echo "----------------------------------------"
+        unzip -x $zipfile -d $IMG_DIR $IMG_FILE
+        if [ "$?" != "0" ]; then
+            echo "unzip request failed $IMG_DIR/$IMG_FILE"
+            exit 1
+        fi
+    fi
+
+    if [ ! -z $IMG_NAME ]; then
+        # rename the file as first in the series
+        mv $IMG_DIR/$IMG_FILE $IMG_DIR/$IMG_NAME
 
         # find loop device to use as mount point for image file
         loopdev_SD "1"
     else
-        if [ "$config_num" -eq "-1" ]; then
-            # extract the image file - No Config File 
-            if [ ! -f "$LATEST.img" ]; then
-                echo "----------------------------------------"
-                echo " unzip image file to "$LATEST".img"
-                echo "----------------------------------------"
-                unzip -x $zipfile $LATEST.img
-                if [ "$?" != "0" ]; then
-                    echo "unzip request failed $LATEST.img"
-                    exit 1
-                fi
-            fi
-        else
-            # extract the image file into the Config File dir
-            if [ ! -f "$IMG_DIR/$LATEST.img" ]; then
-                echo "----------------------------------------"
-                echo " unzip image file to "$IMG_DIR/$LATEST".img"
-                echo "----------------------------------------"
-                unzip -x $zipfile -d $IMG_DIR $LATEST".img"
-                if [ "$?" != "0" ]; then
-                    echo "unzip request failed $IMG_DIR/$LATEST.img"
-                    exit 1
-                fi
-            fi
-        fi
-
         # find loop device to use as mount point for image file
         loopdev_SD
     fi
@@ -574,10 +588,6 @@ if [ -z "${RPI_ROOT}" -o ! -f "$RPI_ROOT/etc/rpi-issue" -o ! -f "$RPI_ROOT/boot/
     usage raspbian root not as expected
 fi
 
-# Sync the template folder to the mounted filesystem
-if [ "$use_template" = y ]; then
-    SUDO rsync -a template/. $RPI_ROOT
-fi
 
 # create a new hostname file 
 if [ ! -z "$hostname" ]; then
@@ -594,21 +604,30 @@ if [ ! -z "$hostname" ]; then
     fi
 fi
 
-# if a user entered a command from the command line execute it on the mounted file system
+# 
 if [[ $config_num -gt 0 || $rpi_shell == "y" ]]; then
+    # copy the arm emulator - to the image / SD card
     SUDO rsync /usr/bin/qemu-arm-static ${RPI_ROOT}/usr/bin/
-    for f in proc dev sys;do
+    for f in proc dev sys; do
         is_mounted $RPI_ROOT/$f || SUDO mount --bind /$f $RPI_ROOT/$f
     done
+
     # ld.so.preload fix
     SUDO sed -i 's/^/#CHROOT#/g' $RPI_ROOT/etc/ld.so.preload
 
+    # If a config is selected then run the config script on the image / SD card
     if [ $config_num -gt 0 ]; then
+        # If the template folder exists copy it
+        if [ -d $IMG_DIR/template ]; then
+            mkdir $RPI_ROOT/home/pi/template
+            cp -r $IMG_DIR/template/* $RPI_ROOT/home/pi/template
+        fi
+
         # copy the target script file and make it executable
         cp rpido-target.sh $RPI_ROOT/home/pi/rpido-target.sh
         chmod +x $RPI_ROOT/home/pi/rpido-target.sh
 
-        # copy the target script file and make it executable
+        # copy the target config file and make it executable
         cp $MY_SCRIPT_DIR/$MY_CONFIG_FILE $RPI_ROOT/home/pi/rpido-config.sh
         chmod +x $RPI_ROOT/home/pi/rpido-config.sh
 
@@ -616,6 +635,7 @@ if [[ $config_num -gt 0 || $rpi_shell == "y" ]]; then
         SUDO chroot ${RPI_ROOT} /home/pi/rpido-target.sh
     fi
 
+    # if -s then start a chroot shell
     if [[ $rpi_shell == "y" ]]; then
         SUDO chroot ${RPI_ROOT} /bin/bash -i
     fi
@@ -623,6 +643,7 @@ if [[ $config_num -gt 0 || $rpi_shell == "y" ]]; then
     # remove the script and config file
     [ -e $RPI_ROOT/home/pi/rpido-target.sh ] && rm $RPI_ROOT/home/pi/rpido-target.sh
     [ -e $RPI_ROOT/home/pi/rpido-config.sh ] && rm $RPI_ROOT/home/pi/rpido-config.sh
+    [ -d $RPI_ROOT/home/pi/template ] && rm $RPI_ROOT/home/pi/template
 
     # revert ld.so.preload fix
     SUDO sed -i 's/^#CHROOT#//g' $RPI_ROOT/etc/ld.so.preload
