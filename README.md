@@ -4,6 +4,18 @@ Shell script for config of Raspbian for Raspberry Pi inspired by a script of the
 
 If you set up a number of Raspberry Pi configurations, need to configure a computer cluster or want to setup online access without a monitor and keyboard then you should find this script useful.
 
+## Nov 13 2019
+
+I'm adding a page to this wiki for some explanation on directories for the project.
+
+I have removed the -t template option.  If the template directory exists then it will be used.  For more information see the Project Directories wiki page.
+
+I have removed some repetitive code sections thinking I was simplifying it.  Although now shorter, it is probably harder to understand.  Should scripts be written to simplify understanding of the function over any kind of optimization?  Anyone want to tell me their best practices for writing scripts?
+
+VNC is still not working. I'm thinking I may need to make my own startup service to make some changes.
+
+Last thought, this version hasn't had much testing.
+
 ## Oct 29 2019
 
 A lot of effort has gone into updating the wiki for this project.  I will continue to work on it. Please check it out.
